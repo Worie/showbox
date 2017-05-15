@@ -1,26 +1,22 @@
+const PACKAGE_NAME = 'showbox';
+const _mapValues = (obj, cb) => {
+  Object.keys(obj).forEach( key => {
+    obj[key] = cb(obj[key], key);
+  });
+  
+  return obj;
+};
 
 // default color set, move
 let config = {
-  "animateEndValue": {
-    "background-color": "rgba(138, 182, 243, 0.83)",
-    opacity: 0.7
-  },
-  "animateStartValue": {
-    "background-color": "rgba(0, 162, 255, 0.5)",
-
-  },
   "borderColor": "rgba(255, 239, 137, 0.74)",
   "marginStyling": {
-    "background-color": "rgba(242, 147, 19, 0.79)",
-    opacity: 0.7
+    "background-color": "rgba(242, 147, 19, 0.79)"
   },
   "paddingStyling": {
-    "background-color": "rgb(116, 204, 77)",
-    opacity: 0.7
-  },
-  "showPaddingMargin": true
+    "background-color": "rgba(116, 204, 77, 0.55)"
+  }
 };
-
 
 // animation, later
 var req, timeout;
@@ -40,80 +36,102 @@ var animateHighlight = function (time) {
 // simplify
 const createBoxModel = options => {
   let props = getObjectProperties(options.node);
-  ({ innerWidth, innerHeight, offset, computed } = props);  
   
-  let div = document.createElement('div');
+  if (!canBeHighlighted(props)) {
+    return;
+  }
   
-  let _createVisualizationEls = function (options) {
-    ({type, cb, styling} = options);
-    for (let side in type) {
+  ({ width, height, offset, computed } = props);  
+  
+  let highlightEl = document.createElement('div');
+  
+  highlightEl.setAttribute(`data-${PACKAGE_NAME}-type`,'highlight');
+  
+  let _createVisualizationEls = options => {
+    ({obj, type, cb, styling} = options);
+    
+    Object.keys(obj).forEach( side => {
+      // Generate the styles for element on each side via cb function
+      // And add user config to it
       let styles = Object.assign(cb(props, side), styling);
-      let obj = Object.assign(
-        {},
-        options,
-        { styles: styles}
-      );
-
-      div.appendChild(
-        createElement(obj)
-      );
-    };
+      
+      
+      let createdEl = createElement(styles);
+      
+      createdEl.setAttribute(`data-${PACKAGE_NAME}-type`, type);
+      createdEl.setAttribute(`data-${PACKAGE_NAME}-side`, side);
+      
+      createdEl.style.willChange = "transform";
+      
+      highlightEl.appendChild(createdEl);
+    });
   };
   
   _createVisualizationEls({
-    type: props.padding,
+    type: 'padding',
+    obj: props.padding,
     cb: paddingRectStyling,
     styling: config.paddingStyling
   });
   
   _createVisualizationEls({
-    type: props.margin,
+    type: 'margin',
+    obj: props.margin,
     cb: marginRectStyling,
     styling: config.marginStyling
   });
   
+  const COMPUTED = Symbol('computed property');
+  
   let mainBoxStyles = {
-    "left": `${ offset.left }px`,
-    "top": `${ offset.top }px`,
-    "width": `${ innerWidth }px`,
-    "height": `${ innerHeight }px`,
-    "z-index": 2000000, //magic number
+    "left": 0,
+    "top": 0,
+    "width": `${ width }px`,
+    "height": `${ height }px`,
+    // what are the maximum z-index value across browsers
     "margin": 0,
     "padding": 0,
     "position": "absolute",
-    "pointer-events": "none",
-    "box-sizing": computed.getPropertyValue('box-sizing'),
-    // you cant just get border-right etc due to FF support. thanks
-    "border-right-width": computed.getPropertyValue('border-right-width'),		
-    "border-left-width": computed.getPropertyValue('border-left-width'),		
-    "border-top-width": computed.getPropertyValue('border-top-width'),		
-    "border-bottom-width": computed.getPropertyValue('border-bottom-width'),				
-    "border-right-style": computed.getPropertyValue('border-right-style'),		
-    "border-left-style": computed.getPropertyValue('border-left-style'),		
-    "border-top-style": computed.getPropertyValue('border-top-style'),		
-    "border-bottom-style": computed.getPropertyValue('border-bottom-style'),				
-    "transform": computed.getPropertyValue('transform'),		
-    "transform-origin": computed.getPropertyValue('transform-origin'),	
-    "border-color": config.borderColor
+    "box-sizing": COMPUTED,
+    "transform": COMPUTED,
+    "transform-origin": COMPUTED,
+    "border-right-width": COMPUTED,
+    "border-left-width": COMPUTED,
+    "border-top-width": COMPUTED,
+    "border-bottom-width": COMPUTED,		
+    "border-right-style": COMPUTED,		
+    "border-left-style": COMPUTED,		
+    "border-top-style": COMPUTED,		
+    "border-bottom-style": COMPUTED,	
+    "border-color": config.borderColor,
+    "display": COMPUTED
   };
   
-  Object.assign(div.style, mainBoxStyles);
+  Object.assign(highlightEl.style, _mapValues(
+    mainBoxStyles,
+    (v, key) => v === COMPUTED ?
+      computed.getPropertyValue(key) : 
+      v
+  ));
   
-  // move to config
-  div.classList.add('highlight');
+  let wrapperEl = document.createElement('div');
   
-  if (props.transition.duration) {
-    animateHighlight(props.transition.duration);
-  }
-
-  if (props.animation.duration) {
-    animateHighlight(props.animation.duration);
-  }
-
-  document.body.appendChild(div);
+  const wrapperStyles = {
+    "left": `${ offset.left }px`,
+    "top": `${ offset.top }px`,
+    "z-index": 2000000, //magic number
+    "position": 'absolute',
+    "pointer-events": "none"
+  };
+  
+  Object.assign(wrapperEl.style, wrapperStyles);
+  wrapperEl.appendChild(highlightEl);
+  
+  
+  wrapperEl.setAttribute(`data-${PACKAGE_NAME}-type`, 'wrapper');
+  
+  document.body.appendChild(wrapperEl);
 };
-
-
 
 const getObjectProperties = node => {
   let properties = {};  
@@ -155,19 +173,16 @@ const getObjectProperties = node => {
 
   let borderBox = computed.boxSizing === 'border-box';
   
-  let innerWidth = _getAsFloat('width');
-  let innerHeight = _getAsFloat('height');
-  let outerWidth = innerWidth;
-  let outerHeight = innerHeight;
+  let width = _getAsFloat('width');
+  let height = _getAsFloat('height');
+  
+  let display = _getAsFloat('display');
   
   // If border-box is not applied to the highlighted node,
   // add necessary properties
   if (!borderBox) {
-    innerWidth += padding.left + padding.right;
-    innerHeight += padding.top + padding.bottom;
-    
-    outerWidth = innerWidth + border.right + border.left;
-    outerHeight = innerHeight + border.top + border.bottom;
+    width += padding.left + padding.right;
+    height += padding.top + padding.bottom;
   }
   
   let _getUntransformedOffset = el => {
@@ -192,138 +207,171 @@ const getObjectProperties = node => {
     margin: margin,
     padding: padding,
     border: border,
-    innerWidth: innerWidth,
-    innerHeight: innerHeight,
-    outerWidth: outerWidth,
-    outerHeight: outerHeight,
+    width: width,
+    height: height,
     offset: offset,
     borderBox: borderBox,
     animation: animation,
     transition: transition,
+    display: display,
+    dataset: node.dataset,
     computed: computed
   };
   
   //reconsider returing computed (is it necessery really?);
 };
 
-let createElement = options => {
+let createElement = styles => {
   let divEl = document.createElement('div');
   Object.assign(
     divEl.style, 
-    options.styles
+    styles
   );
-  
-  divEl.classList.add('highlight-element');
   
   return divEl;
 };
 
-let paddingRectStyling = (props, side) => { 
-  let isHorizontal = ['left', 'right'];
-  let width;
-  let height;
-  let left;
-  let top;
-  
-  ({ 
-    border, 
+let getAxisSize = property => {
+  return {
+    horizontal: property.left + property.right,
+    vertical: property.bottom + property.top
+  }
+};
+
+
+let paddingVerticalStyling = (props, side) => {
+  ({
     padding,
-    innerHeight,
-    innerWidth,
-    borderBox
+    height,
+    border,
+    borderBox,
+    width
   } = props);
   
-  if (isHorizontal.indexOf(side) > -1) {
-    width = padding[side];
-    height = innerHeight - padding.bottom - padding.top;
-    top = padding.top;
-    
-    if (borderBox) {
-      height -= (border.top + border.bottom);
-    }
-  } else {
-    height = padding[side];  
-    width = innerWidth;
-    left = 0;
-
-    if (borderBox) {
-      width -= (border.left + border.right);
-    }
-  }
-  
-  let obj = {
-    width: `${ width }px`,
-    height: `${ height }px`,
-    left: (!left ? 'initial' : `${ left }px`),
-    top: (!top ? 'initial' : `${ top }px`),
-    position: `absolute`,
+  let elWidth = ( borderBox ?
+             width - getAxisSize(border)['horizontal'] :
+             width);
+                           
+  return {
+    height: `${ padding[side] }px`,
+    width: `${ elWidth }px`,
+    left: 0,
   };
+};
+
+let paddingHorizontalStyling = (props, side) => {
+  ({
+    padding,
+    height,
+    border,
+    borderBox,
+    width
+  } = props);
   
-  // Pull to the side of the padding
-  obj[side] = 0;
+  let elHeight = ( borderBox ?
+             height - getAxisSize(border)['vertical'] :
+             height);
+  elHeight -= getAxisSize(padding)['vertical'];
+                                                                                               
+  return {
+    height: `${ elHeight }px`,
+    width: `${ padding[side] }px`,
+    top: `${ padding.top }px`,
+  };  
+};
+
+let paddingRectStyling = (props, side) => { 
+
+  const obj = {};
   
-  return obj;
+  if (/[rl]/.test(side)) {
+    Object.assign(obj, paddingHorizontalStyling(props, side));
+  } else {
+    Object.assign(obj, paddingVerticalStyling(props, side));
+  }
+
+  const commonStyling = {
+    position: 'absolute'
+  };
+  commonStyling[side] = 0;
+
+  Object.assign(obj, commonStyling);
+  return obj;  
+};
+
+
+let marginHorizontalRectStyling = (props, side) => {
+  ({
+    margin,
+    height,
+    borderBox
+  } = props);
+                                                                                               
+  const elHeight = (borderBox ? 
+                    height :
+                    height + getAxisSize(border)['vertical']
+                   );
+  return {
+    width: `${ margin[side] }px`,
+    height: `${ elHeight }px`,
+    top: `${ - border.top }px`
+  };
+};
+
+let marginVerticalRectStyling = (props, side) => {
+  ({
+    margin,
+    height
+  } = props);
+  
+  let elWidth = (borderBox ? 
+                   width :
+                   width + getAxisSize(border)['horizontal']
+                  );
+  elWidth += getAxisSize(margin)['horizontal'];
+                                                                                               
+  return {
+    height: `${ margin[side] }px`,
+    width: `${ elWidth }px`,
+    left: `${ - border.left - margin.left }px`
+  };
 };
 
 let marginRectStyling = (props, side) => {
-  let isHorizontal = ['left', 'right'];
-  let width;
-  let height;
-  let left;
-  let top;
-  
-  ({ 
-    border, 
-    outerHeight,
-    outerWidth,
-    margin
-  } = props);
-  
-
-  if (isHorizontal.indexOf(side) > -1) {
-    width = margin[side];
-    height = outerHeight + margin.top + margin.bottom;
-    top = - (margin.top + border.top);
+  ({ display } = props);
+  const obj = {};
+  if (/[rl]/.test(side)) {
+    Object.assign(obj, marginHorizontalRectStyling(props, side));
   } else {
-    height = margin[side];
-    width = outerWidth;
-    left = - border.left;
+    Object.assign(obj, marginVerticalRectStyling(props, side));
   }
 
-  
-  let obj = {
-    width: `${ width }px`,
-    height: `${ height }px`,
-    left: (!left ? 'initial' : `${ left }px`),
-    top: (!top ? 'initial' : `${ top }px`),
-    position: `absolute`,
+  const commonStyling = {
+    position: 'absolute'
   };
-  
-  // position at the side which this margin represents
-  // its calulated from upper left corner (?recheck)
-  obj[side] = `${-(margin[side] + border[side])}px`;
+  commonStyling[side] = `${-(margin[side] + border[side])}px`;
 
+
+  Object.assign(obj, commonStyling);
+  
   return obj;
 };
-          
-// animation, later
 
-// important one 
-
-//            // Don't highlight elements with 0 width & height
-//            if (elementBounds.width === 0 && elementBounds.height === 0) {
-//                return;
-//            }
-            
-
-
+let canBeHighlighted = props => {
+  ({
+    display,
+    width,
+    height,
+    dataset
+  } = props);
   
-document.body.addEventListener('click', ev => {
-  hi = document.querySelector('.highlight');
-  if (hi) 
-    hi.parentNode.removeChild(hi);
   
-  if (ev.target)
-  createBoxModel({ node: ev.target });
-});
-// to translateX/Y
+  if (display === 'none' || width === 0 || height === 0)
+    return false;
+  
+  const regex = new RegExp(PACKAGE_NAME);
+  
+  return !Object.keys(dataset).some(key => {
+    return regex.test(key);
+  });
+};
